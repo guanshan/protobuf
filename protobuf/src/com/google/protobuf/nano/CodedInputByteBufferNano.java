@@ -1,474 +1,413 @@
-/*     */ package com.google.protobuf.nano;
-/*     */ 
-/*     */ import java.io.IOException;
-/*     */ 
-/*     */ public final class CodedInputByteBufferNano
-/*     */ {
-/*     */   private final byte[] buffer;
-/*     */   private int bufferStart;
-/*     */   private int bufferSize;
-/*     */   private int bufferSizeAfterLimit;
-/*     */   private int bufferPos;
-/*     */   private int lastTag;
-/* 403 */   private int currentLimit = 2147483647;
-/*     */   private int recursionDepth;
-/* 407 */   private int recursionLimit = 64;
-/*     */ 
-/* 410 */   private int sizeLimit = 67108864;
-/*     */   private static final int DEFAULT_RECURSION_LIMIT = 64;
-/*     */   private static final int DEFAULT_SIZE_LIMIT = 67108864;
-/*     */ 
-/*     */   public static CodedInputByteBufferNano newInstance(byte[] buf)
-/*     */   {
-/*  52 */     return newInstance(buf, 0, buf.length);
-/*     */   }
-/*     */ 
-/*     */   public static CodedInputByteBufferNano newInstance(byte[] buf, int off, int len)
-/*     */   {
-/*  60 */     return new CodedInputByteBufferNano(buf, off, len);
-/*     */   }
-/*     */ 
-/*     */   public int readTag()
-/*     */     throws IOException
-/*     */   {
-/*  71 */     if (isAtEnd()) {
-/*  72 */       this.lastTag = 0;
-/*  73 */       return 0;
-/*     */     }
-/*     */ 
-/*  76 */     this.lastTag = readRawVarint32();
-/*  77 */     if (this.lastTag == 0)
-/*     */     {
-/*  79 */       throw InvalidProtocolBufferNanoException.invalidTag();
-/*     */     }
-/*  81 */     return this.lastTag;
-/*     */   }
-/*     */ 
-/*     */   public void checkLastTagWas(int value)
-/*     */     throws InvalidProtocolBufferNanoException
-/*     */   {
-/*  94 */     if (this.lastTag != value)
-/*  95 */       throw InvalidProtocolBufferNanoException.invalidEndTag();
-/*     */   }
-/*     */ 
-/*     */   public boolean skipField(int tag)
-/*     */     throws IOException
-/*     */   {
-/* 106 */     switch (WireFormatNano.getTagWireType(tag)) {
-/*     */     case 0:
-/* 108 */       readInt32();
-/* 109 */       return true;
-/*     */     case 1:
-/* 111 */       readRawLittleEndian64();
-/* 112 */       return true;
-/*     */     case 2:
-/* 114 */       skipRawBytes(readRawVarint32());
-/* 115 */       return true;
-/*     */     case 3:
-/* 117 */       skipMessage();
-/* 118 */       checkLastTagWas(WireFormatNano.makeTag(WireFormatNano.getTagFieldNumber(tag), 4));
-/*     */ 
-/* 121 */       return true;
-/*     */     case 4:
-/* 123 */       return false;
-/*     */     case 5:
-/* 125 */       readRawLittleEndian32();
-/* 126 */       return true;
-/*     */     }
-/* 128 */     throw InvalidProtocolBufferNanoException.invalidWireType();
-/*     */   }
-/*     */ 
-/*     */   public void skipMessage()
-/*     */     throws IOException
-/*     */   {
-/*     */     while (true)
-/*     */     {
-/* 138 */       int tag = readTag();
-/* 139 */       if ((tag == 0) || (!skipField(tag)))
-/* 140 */         return;
-/*     */     }
-/*     */   }
-/*     */ 
-/*     */   public double readDouble()
-/*     */     throws IOException
-/*     */   {
-/* 149 */     return Double.longBitsToDouble(readRawLittleEndian64());
-/*     */   }
-/*     */ 
-/*     */   public float readFloat() throws IOException
-/*     */   {
-/* 154 */     return Float.intBitsToFloat(readRawLittleEndian32());
-/*     */   }
-/*     */ 
-/*     */   public long readUInt64() throws IOException
-/*     */   {
-/* 159 */     return readRawVarint64();
-/*     */   }
-/*     */ 
-/*     */   public long readInt64() throws IOException
-/*     */   {
-/* 164 */     return readRawVarint64();
-/*     */   }
-/*     */ 
-/*     */   public int readInt32() throws IOException
-/*     */   {
-/* 169 */     return readRawVarint32();
-/*     */   }
-/*     */ 
-/*     */   public long readFixed64() throws IOException
-/*     */   {
-/* 174 */     return readRawLittleEndian64();
-/*     */   }
-/*     */ 
-/*     */   public int readFixed32() throws IOException
-/*     */   {
-/* 179 */     return readRawLittleEndian32();
-/*     */   }
-/*     */ 
-/*     */   public boolean readBool() throws IOException
-/*     */   {
-/* 184 */     return readRawVarint32() != 0;
-/*     */   }
-/*     */ 
-/*     */   public String readString() throws IOException
-/*     */   {
-/* 189 */     int size = readRawVarint32();
-/* 190 */     if ((size <= this.bufferSize - this.bufferPos) && (size > 0))
-/*     */     {
-/* 193 */       String result = new String(this.buffer, this.bufferPos, size, "UTF-8");
-/* 194 */       this.bufferPos += size;
-/* 195 */       return result;
-/*     */     }
-/*     */ 
-/* 198 */     return new String(readRawBytes(size), "UTF-8");
-/*     */   }
-/*     */ 
-/*     */   public void readGroup(MessageNano msg, int fieldNumber)
-/*     */     throws IOException
-/*     */   {
-/* 205 */     if (this.recursionDepth >= this.recursionLimit) {
-/* 206 */       throw InvalidProtocolBufferNanoException.recursionLimitExceeded();
-/*     */     }
-/* 208 */     this.recursionDepth += 1;
-/* 209 */     msg.mergeFrom(this);
-/* 210 */     checkLastTagWas(WireFormatNano.makeTag(fieldNumber, 4));
-/*     */ 
-/* 212 */     this.recursionDepth -= 1;
-/*     */   }
-/*     */ 
-/*     */   public void readMessage(MessageNano msg) throws IOException
-/*     */   {
-/* 217 */     int length = readRawVarint32();
-/* 218 */     if (this.recursionDepth >= this.recursionLimit) {
-/* 219 */       throw InvalidProtocolBufferNanoException.recursionLimitExceeded();
-/*     */     }
-/* 221 */     int oldLimit = pushLimit(length);
-/* 222 */     this.recursionDepth += 1;
-/* 223 */     msg.mergeFrom(this);
-/* 224 */     checkLastTagWas(0);
-/* 225 */     this.recursionDepth -= 1;
-/* 226 */     popLimit(oldLimit);
-/*     */   }
-/*     */ 
-/*     */   public byte[] readBytes() throws IOException
-/*     */   {
-/* 231 */     int size = readRawVarint32();
-/* 232 */     if ((size <= this.bufferSize - this.bufferPos) && (size > 0))
-/*     */     {
-/* 235 */       byte[] result = new byte[size];
-/* 236 */       System.arraycopy(this.buffer, this.bufferPos, result, 0, size);
-/* 237 */       this.bufferPos += size;
-/* 238 */       return result;
-/*     */     }
-/*     */ 
-/* 241 */     return readRawBytes(size);
-/*     */   }
-/*     */ 
-/*     */   public int readUInt32()
-/*     */     throws IOException
-/*     */   {
-/* 247 */     return readRawVarint32();
-/*     */   }
-/*     */ 
-/*     */   public int readEnum()
-/*     */     throws IOException
-/*     */   {
-/* 255 */     return readRawVarint32();
-/*     */   }
-/*     */ 
-/*     */   public int readSFixed32() throws IOException
-/*     */   {
-/* 260 */     return readRawLittleEndian32();
-/*     */   }
-/*     */ 
-/*     */   public long readSFixed64() throws IOException
-/*     */   {
-/* 265 */     return readRawLittleEndian64();
-/*     */   }
-/*     */ 
-/*     */   public int readSInt32() throws IOException
-/*     */   {
-/* 270 */     return decodeZigZag32(readRawVarint32());
-/*     */   }
-/*     */ 
-/*     */   public long readSInt64() throws IOException
-/*     */   {
-/* 275 */     return decodeZigZag64(readRawVarint64());
-/*     */   }
-/*     */ 
-/*     */   public int readRawVarint32()
-/*     */     throws IOException
-/*     */   {
-/* 285 */     byte tmp = readRawByte();
-/* 286 */     if (tmp >= 0) {
-/* 287 */       return tmp;
-/*     */     }
-/* 289 */     int result = tmp & 0x7F;
-/* 290 */     if ((tmp = readRawByte()) >= 0) {
-/* 291 */       result |= tmp << 7;
-/*     */     } else {
-/* 293 */       result |= (tmp & 0x7F) << 7;
-/* 294 */       if ((tmp = readRawByte()) >= 0) {
-/* 295 */         result |= tmp << 14;
-/*     */       } else {
-/* 297 */         result |= (tmp & 0x7F) << 14;
-/* 298 */         if ((tmp = readRawByte()) >= 0) {
-/* 299 */           result |= tmp << 21;
-/*     */         } else {
-/* 301 */           result |= (tmp & 0x7F) << 21;
-/* 302 */           result |= (tmp = readRawByte()) << 28;
-/* 303 */           if (tmp < 0)
-/*     */           {
-/* 305 */             for (int i = 0; i < 5; i++) {
-/* 306 */               if (readRawByte() >= 0) {
-/* 307 */                 return result;
-/*     */               }
-/*     */             }
-/* 310 */             throw InvalidProtocolBufferNanoException.malformedVarint();
-/*     */           }
-/*     */         }
-/*     */       }
-/*     */     }
-/* 315 */     return result;
-/*     */   }
-/*     */ 
-/*     */   public long readRawVarint64() throws IOException
-/*     */   {
-/* 320 */     int shift = 0;
-/* 321 */     long result = 0L;
-/* 322 */     while (shift < 64) {
-/* 323 */       byte b = readRawByte();
-/* 324 */       result |= (b & 0x7F) << shift;
-/* 325 */       if ((b & 0x80) == 0) {
-/* 326 */         return result;
-/*     */       }
-/* 328 */       shift += 7;
-/*     */     }
-/* 330 */     throw InvalidProtocolBufferNanoException.malformedVarint();
-/*     */   }
-/*     */ 
-/*     */   public int readRawLittleEndian32() throws IOException
-/*     */   {
-/* 335 */     byte b1 = readRawByte();
-/* 336 */     byte b2 = readRawByte();
-/* 337 */     byte b3 = readRawByte();
-/* 338 */     byte b4 = readRawByte();
-/* 339 */     return b1 & 0xFF | (b2 & 0xFF) << 8 | (b3 & 0xFF) << 16 | (b4 & 0xFF) << 24;
-/*     */   }
-/*     */ 
-/*     */   public long readRawLittleEndian64()
-/*     */     throws IOException
-/*     */   {
-/* 347 */     byte b1 = readRawByte();
-/* 348 */     byte b2 = readRawByte();
-/* 349 */     byte b3 = readRawByte();
-/* 350 */     byte b4 = readRawByte();
-/* 351 */     byte b5 = readRawByte();
-/* 352 */     byte b6 = readRawByte();
-/* 353 */     byte b7 = readRawByte();
-/* 354 */     byte b8 = readRawByte();
-/* 355 */     return b1 & 0xFF | (b2 & 0xFF) << 8 | (b3 & 0xFF) << 16 | (b4 & 0xFF) << 24 | (b5 & 0xFF) << 32 | (b6 & 0xFF) << 40 | (b7 & 0xFF) << 48 | (b8 & 0xFF) << 56;
-/*     */   }
-/*     */ 
-/*     */   public static int decodeZigZag32(int n)
-/*     */   {
-/* 376 */     return n >>> 1 ^ -(n & 0x1);
-/*     */   }
-/*     */ 
-/*     */   public static long decodeZigZag64(long n)
-/*     */   {
-/* 390 */     return n >>> 1 ^ -(n & 1L);
-/*     */   }
-/*     */ 
-/*     */   private CodedInputByteBufferNano(byte[] buffer, int off, int len)
-/*     */   {
-/* 416 */     this.buffer = buffer;
-/* 417 */     this.bufferStart = off;
-/* 418 */     this.bufferSize = (off + len);
-/* 419 */     this.bufferPos = off;
-/*     */   }
-/*     */ 
-/*     */   public int setRecursionLimit(int limit)
-/*     */   {
-/* 430 */     if (limit < 0) {
-/* 431 */       throw new IllegalArgumentException("Recursion limit cannot be negative: " + limit);
-/*     */     }
-/*     */ 
-/* 434 */     int oldLimit = this.recursionLimit;
-/* 435 */     this.recursionLimit = limit;
-/* 436 */     return oldLimit;
-/*     */   }
-/*     */ 
-/*     */   public int setSizeLimit(int limit)
-/*     */   {
-/* 455 */     if (limit < 0) {
-/* 456 */       throw new IllegalArgumentException("Size limit cannot be negative: " + limit);
-/*     */     }
-/*     */ 
-/* 459 */     int oldLimit = this.sizeLimit;
-/* 460 */     this.sizeLimit = limit;
-/* 461 */     return oldLimit;
-/*     */   }
-/*     */ 
-/*     */   public void resetSizeCounter()
-/*     */   {
-/*     */   }
-/*     */ 
-/*     */   public int pushLimit(int byteLimit)
-/*     */     throws InvalidProtocolBufferNanoException
-/*     */   {
-/* 477 */     if (byteLimit < 0) {
-/* 478 */       throw InvalidProtocolBufferNanoException.negativeSize();
-/*     */     }
-/* 480 */     byteLimit += this.bufferPos;
-/* 481 */     int oldLimit = this.currentLimit;
-/* 482 */     if (byteLimit > oldLimit) {
-/* 483 */       throw InvalidProtocolBufferNanoException.truncatedMessage();
-/*     */     }
-/* 485 */     this.currentLimit = byteLimit;
-/*     */ 
-/* 487 */     recomputeBufferSizeAfterLimit();
-/*     */ 
-/* 489 */     return oldLimit;
-/*     */   }
-/*     */ 
-/*     */   private void recomputeBufferSizeAfterLimit() {
-/* 493 */     this.bufferSize += this.bufferSizeAfterLimit;
-/* 494 */     int bufferEnd = this.bufferSize;
-/* 495 */     if (bufferEnd > this.currentLimit)
-/*     */     {
-/* 497 */       this.bufferSizeAfterLimit = (bufferEnd - this.currentLimit);
-/* 498 */       this.bufferSize -= this.bufferSizeAfterLimit;
-/*     */     } else {
-/* 500 */       this.bufferSizeAfterLimit = 0;
-/*     */     }
-/*     */   }
-/*     */ 
-/*     */   public void popLimit(int oldLimit)
-/*     */   {
-/* 510 */     this.currentLimit = oldLimit;
-/* 511 */     recomputeBufferSizeAfterLimit();
-/*     */   }
-/*     */ 
-/*     */   public int getBytesUntilLimit()
-/*     */   {
-/* 519 */     if (this.currentLimit == 2147483647) {
-/* 520 */       return -1;
-/*     */     }
-/*     */ 
-/* 523 */     int currentAbsolutePosition = this.bufferPos;
-/* 524 */     return this.currentLimit - currentAbsolutePosition;
-/*     */   }
-/*     */ 
-/*     */   public boolean isAtEnd()
-/*     */   {
-/* 533 */     return this.bufferPos == this.bufferSize;
-/*     */   }
-/*     */ 
-/*     */   public int getPosition()
-/*     */   {
-/* 540 */     return this.bufferPos - this.bufferStart;
-/*     */   }
-/*     */ 
-/*     */   public byte[] getData(int offset, int length)
-/*     */   {
-/* 551 */     if (length == 0) {
-/* 552 */       return WireFormatNano.EMPTY_BYTES;
-/*     */     }
-/* 554 */     byte[] copy = new byte[length];
-/* 555 */     int start = this.bufferStart + offset;
-/* 556 */     System.arraycopy(this.buffer, start, copy, 0, length);
-/* 557 */     return copy;
-/*     */   }
-/*     */ 
-/*     */   public void rewindToPosition(int position)
-/*     */   {
-/* 564 */     if (position > this.bufferPos - this.bufferStart) {
-/* 565 */       throw new IllegalArgumentException("Position " + position + " is beyond current " + (this.bufferPos - this.bufferStart));
-/*     */     }
-/*     */ 
-/* 568 */     if (position < 0) {
-/* 569 */       throw new IllegalArgumentException("Bad position " + position);
-/*     */     }
-/* 571 */     this.bufferPos = (this.bufferStart + position);
-/*     */   }
-/*     */ 
-/*     */   public byte readRawByte()
-/*     */     throws IOException
-/*     */   {
-/* 581 */     if (this.bufferPos == this.bufferSize) {
-/* 582 */       throw InvalidProtocolBufferNanoException.truncatedMessage();
-/*     */     }
-/* 584 */     return this.buffer[(this.bufferPos++)];
-/*     */   }
-/*     */ 
-/*     */   public byte[] readRawBytes(int size)
-/*     */     throws IOException
-/*     */   {
-/* 594 */     if (size < 0) {
-/* 595 */       throw InvalidProtocolBufferNanoException.negativeSize();
-/*     */     }
-/*     */ 
-/* 598 */     if (this.bufferPos + size > this.currentLimit)
-/*     */     {
-/* 600 */       skipRawBytes(this.currentLimit - this.bufferPos);
-/*     */ 
-/* 602 */       throw InvalidProtocolBufferNanoException.truncatedMessage();
-/*     */     }
-/*     */ 
-/* 605 */     if (size <= this.bufferSize - this.bufferPos)
-/*     */     {
-/* 607 */       byte[] bytes = new byte[size];
-/* 608 */       System.arraycopy(this.buffer, this.bufferPos, bytes, 0, size);
-/* 609 */       this.bufferPos += size;
-/* 610 */       return bytes;
-/*     */     }
-/* 612 */     throw InvalidProtocolBufferNanoException.truncatedMessage();
-/*     */   }
-/*     */ 
-/*     */   public void skipRawBytes(int size)
-/*     */     throws IOException
-/*     */   {
-/* 623 */     if (size < 0) {
-/* 624 */       throw InvalidProtocolBufferNanoException.negativeSize();
-/*     */     }
-/*     */ 
-/* 627 */     if (this.bufferPos + size > this.currentLimit)
-/*     */     {
-/* 629 */       skipRawBytes(this.currentLimit - this.bufferPos);
-/*     */ 
-/* 631 */       throw InvalidProtocolBufferNanoException.truncatedMessage();
-/*     */     }
-/*     */ 
-/* 634 */     if (size <= this.bufferSize - this.bufferPos)
-/*     */     {
-/* 636 */       this.bufferPos += size;
-/*     */     }
-/* 638 */     else throw InvalidProtocolBufferNanoException.truncatedMessage();
-/*     */   }
-/*     */ }
+package com.google.protobuf.nano;
 
-/* Location:           /Users/guanshanshan/Documents/各种SDK相关/libprotobuf-java-2.6-nano.jar
- * Qualified Name:     com.google.protobuf.nano.CodedInputByteBufferNano
- * JD-Core Version:    0.6.2
- */
+import java.io.IOException;
+
+public final class CodedInputByteBufferNano {
+	private final byte[] buffer;
+	private int bufferStart;
+	private int bufferSize;
+	private int bufferSizeAfterLimit;
+	private int bufferPos;
+	private int lastTag;
+	private int currentLimit = 2147483647;
+	private int recursionDepth;
+	private int recursionLimit = 64;
+
+	private int sizeLimit = 67108864;
+	private static final int DEFAULT_RECURSION_LIMIT = 64;
+	private static final int DEFAULT_SIZE_LIMIT = 67108864;
+
+	public static CodedInputByteBufferNano newInstance(byte[] buf) {
+		return newInstance(buf, 0, buf.length);
+	}
+
+	public static CodedInputByteBufferNano newInstance(byte[] buf, int off,
+			int len) {
+		return new CodedInputByteBufferNano(buf, off, len);
+	}
+
+	public int readTag() throws IOException {
+		if (isAtEnd()) {
+			this.lastTag = 0;
+			return 0;
+		}
+
+		this.lastTag = readRawVarint32();
+		if (this.lastTag == 0) {
+			throw InvalidProtocolBufferNanoException.invalidTag();
+		}
+		return this.lastTag;
+	}
+
+	public void checkLastTagWas(int value)
+			throws InvalidProtocolBufferNanoException {
+		if (this.lastTag != value)
+			throw InvalidProtocolBufferNanoException.invalidEndTag();
+	}
+
+	public boolean skipField(int tag) throws IOException {
+		switch (WireFormatNano.getTagWireType(tag)) {
+		case 0:
+			readInt32();
+			return true;
+		case 1:
+			readRawLittleEndian64();
+			return true;
+		case 2:
+			skipRawBytes(readRawVarint32());
+			return true;
+		case 3:
+			skipMessage();
+			checkLastTagWas(WireFormatNano.makeTag(
+					WireFormatNano.getTagFieldNumber(tag), 4));
+
+			return true;
+		case 4:
+			return false;
+		case 5:
+			readRawLittleEndian32();
+			return true;
+		}
+		throw InvalidProtocolBufferNanoException.invalidWireType();
+	}
+
+	public void skipMessage() throws IOException {
+		while (true) {
+			int tag = readTag();
+			if ((tag == 0) || (!skipField(tag)))
+				return;
+		}
+	}
+
+	public double readDouble() throws IOException {
+		return Double.longBitsToDouble(readRawLittleEndian64());
+	}
+
+	public float readFloat() throws IOException {
+		return Float.intBitsToFloat(readRawLittleEndian32());
+	}
+
+	public long readUInt64() throws IOException {
+		return readRawVarint64();
+	}
+
+	public long readInt64() throws IOException {
+		return readRawVarint64();
+	}
+
+	public int readInt32() throws IOException {
+		return readRawVarint32();
+	}
+
+	public long readFixed64() throws IOException {
+		return readRawLittleEndian64();
+	}
+
+	public int readFixed32() throws IOException {
+		return readRawLittleEndian32();
+	}
+
+	public boolean readBool() throws IOException {
+		return readRawVarint32() != 0;
+	}
+
+	public String readString() throws IOException {
+		int size = readRawVarint32();
+		if ((size <= this.bufferSize - this.bufferPos) && (size > 0)) {
+			String result = new String(this.buffer, this.bufferPos, size,
+					"UTF-8");
+			this.bufferPos += size;
+			return result;
+		}
+
+		return new String(readRawBytes(size), "UTF-8");
+	}
+
+	public void readGroup(MessageNano msg, int fieldNumber) throws IOException {
+		if (this.recursionDepth >= this.recursionLimit) {
+			throw InvalidProtocolBufferNanoException.recursionLimitExceeded();
+		}
+		this.recursionDepth += 1;
+		msg.mergeFrom(this);
+		checkLastTagWas(WireFormatNano.makeTag(fieldNumber, 4));
+
+		this.recursionDepth -= 1;
+	}
+
+	public void readMessage(MessageNano msg) throws IOException {
+		int length = readRawVarint32();
+		if (this.recursionDepth >= this.recursionLimit) {
+			throw InvalidProtocolBufferNanoException.recursionLimitExceeded();
+		}
+		int oldLimit = pushLimit(length);
+		this.recursionDepth += 1;
+		msg.mergeFrom(this);
+		checkLastTagWas(0);
+		this.recursionDepth -= 1;
+		popLimit(oldLimit);
+	}
+
+	public byte[] readBytes() throws IOException {
+		int size = readRawVarint32();
+		if ((size <= this.bufferSize - this.bufferPos) && (size > 0)) {
+			byte[] result = new byte[size];
+			System.arraycopy(this.buffer, this.bufferPos, result, 0, size);
+			this.bufferPos += size;
+			return result;
+		}
+
+		return readRawBytes(size);
+	}
+
+	public int readUInt32() throws IOException {
+		return readRawVarint32();
+	}
+
+	public int readEnum() throws IOException {
+		return readRawVarint32();
+	}
+
+	public int readSFixed32() throws IOException {
+		return readRawLittleEndian32();
+	}
+
+	public long readSFixed64() throws IOException {
+		return readRawLittleEndian64();
+	}
+
+	public int readSInt32() throws IOException {
+		return decodeZigZag32(readRawVarint32());
+	}
+
+	public long readSInt64() throws IOException {
+		return decodeZigZag64(readRawVarint64());
+	}
+
+	public int readRawVarint32() throws IOException {
+		byte tmp = readRawByte();
+		if (tmp >= 0) {
+			return tmp;
+		}
+		int result = tmp & 0x7F;
+		if ((tmp = readRawByte()) >= 0) {
+			result |= tmp << 7;
+		} else {
+			result |= (tmp & 0x7F) << 7;
+			if ((tmp = readRawByte()) >= 0) {
+				result |= tmp << 14;
+			} else {
+				result |= (tmp & 0x7F) << 14;
+				if ((tmp = readRawByte()) >= 0) {
+					result |= tmp << 21;
+				} else {
+					result |= (tmp & 0x7F) << 21;
+					result |= (tmp = readRawByte()) << 28;
+					if (tmp < 0) {
+						for (int i = 0; i < 5; i++) {
+							if (readRawByte() >= 0) {
+								return result;
+							}
+						}
+						throw InvalidProtocolBufferNanoException
+								.malformedVarint();
+					}
+				}
+			}
+		}
+		return result;
+	}
+
+	public long readRawVarint64() throws IOException {
+		int shift = 0;
+		long result = 0L;
+		while (shift < 64) {
+			byte b = readRawByte();
+			result |= (b & 0x7F) << shift;
+			if ((b & 0x80) == 0) {
+				return result;
+			}
+			shift += 7;
+		}
+		throw InvalidProtocolBufferNanoException.malformedVarint();
+	}
+
+	public int readRawLittleEndian32() throws IOException {
+		byte b1 = readRawByte();
+		byte b2 = readRawByte();
+		byte b3 = readRawByte();
+		byte b4 = readRawByte();
+		return b1 & 0xFF | (b2 & 0xFF) << 8 | (b3 & 0xFF) << 16
+				| (b4 & 0xFF) << 24;
+	}
+
+	public long readRawLittleEndian64() throws IOException {
+		byte b1 = readRawByte();
+		byte b2 = readRawByte();
+		byte b3 = readRawByte();
+		byte b4 = readRawByte();
+		byte b5 = readRawByte();
+		byte b6 = readRawByte();
+		byte b7 = readRawByte();
+		byte b8 = readRawByte();
+		return b1 & 0xFF | (b2 & 0xFF) << 8 | (b3 & 0xFF) << 16
+				| (b4 & 0xFF) << 24 | (b5 & 0xFF) << 32 | (b6 & 0xFF) << 40
+				| (b7 & 0xFF) << 48 | (b8 & 0xFF) << 56;
+	}
+
+	public static int decodeZigZag32(int n) {
+		return n >>> 1 ^ -(n & 0x1);
+	}
+
+	public static long decodeZigZag64(long n) {
+		return n >>> 1 ^ -(n & 1L);
+	}
+
+	private CodedInputByteBufferNano(byte[] buffer, int off, int len) {
+		this.buffer = buffer;
+		this.bufferStart = off;
+		this.bufferSize = (off + len);
+		this.bufferPos = off;
+	}
+
+	public int setRecursionLimit(int limit) {
+		if (limit < 0) {
+			throw new IllegalArgumentException(
+					"Recursion limit cannot be negative: " + limit);
+		}
+
+		int oldLimit = this.recursionLimit;
+		this.recursionLimit = limit;
+		return oldLimit;
+	}
+
+	public int setSizeLimit(int limit) {
+		if (limit < 0) {
+			throw new IllegalArgumentException(
+					"Size limit cannot be negative: " + limit);
+		}
+
+		int oldLimit = this.sizeLimit;
+		this.sizeLimit = limit;
+		return oldLimit;
+	}
+
+	public void resetSizeCounter() {
+	}
+
+	public int pushLimit(int byteLimit)
+			throws InvalidProtocolBufferNanoException {
+		if (byteLimit < 0) {
+			throw InvalidProtocolBufferNanoException.negativeSize();
+		}
+		byteLimit += this.bufferPos;
+		int oldLimit = this.currentLimit;
+		if (byteLimit > oldLimit) {
+			throw InvalidProtocolBufferNanoException.truncatedMessage();
+		}
+		this.currentLimit = byteLimit;
+
+		recomputeBufferSizeAfterLimit();
+
+		return oldLimit;
+	}
+
+	private void recomputeBufferSizeAfterLimit() {
+		this.bufferSize += this.bufferSizeAfterLimit;
+		int bufferEnd = this.bufferSize;
+		if (bufferEnd > this.currentLimit) {
+			this.bufferSizeAfterLimit = (bufferEnd - this.currentLimit);
+			this.bufferSize -= this.bufferSizeAfterLimit;
+		} else {
+			this.bufferSizeAfterLimit = 0;
+		}
+	}
+
+	public void popLimit(int oldLimit) {
+		this.currentLimit = oldLimit;
+		recomputeBufferSizeAfterLimit();
+	}
+
+	public int getBytesUntilLimit() {
+		if (this.currentLimit == 2147483647) {
+			return -1;
+		}
+
+		int currentAbsolutePosition = this.bufferPos;
+		return this.currentLimit - currentAbsolutePosition;
+	}
+
+	public boolean isAtEnd() {
+		return this.bufferPos == this.bufferSize;
+	}
+
+	public int getPosition() {
+		return this.bufferPos - this.bufferStart;
+	}
+
+	public byte[] getData(int offset, int length) {
+		if (length == 0) {
+			return WireFormatNano.EMPTY_BYTES;
+		}
+		byte[] copy = new byte[length];
+		int start = this.bufferStart + offset;
+		System.arraycopy(this.buffer, start, copy, 0, length);
+		return copy;
+	}
+
+	public void rewindToPosition(int position) {
+		if (position > this.bufferPos - this.bufferStart) {
+			throw new IllegalArgumentException("Position " + position
+					+ " is beyond current "
+					+ (this.bufferPos - this.bufferStart));
+		}
+
+		if (position < 0) {
+			throw new IllegalArgumentException("Bad position " + position);
+		}
+		this.bufferPos = (this.bufferStart + position);
+	}
+
+	public byte readRawByte() throws IOException {
+		if (this.bufferPos == this.bufferSize) {
+			throw InvalidProtocolBufferNanoException.truncatedMessage();
+		}
+		return this.buffer[(this.bufferPos++)];
+	}
+
+	public byte[] readRawBytes(int size) throws IOException {
+		if (size < 0) {
+			throw InvalidProtocolBufferNanoException.negativeSize();
+		}
+
+		if (this.bufferPos + size > this.currentLimit) {
+			skipRawBytes(this.currentLimit - this.bufferPos);
+
+			throw InvalidProtocolBufferNanoException.truncatedMessage();
+		}
+
+		if (size <= this.bufferSize - this.bufferPos) {
+			byte[] bytes = new byte[size];
+			System.arraycopy(this.buffer, this.bufferPos, bytes, 0, size);
+			this.bufferPos += size;
+			return bytes;
+		}
+		throw InvalidProtocolBufferNanoException.truncatedMessage();
+	}
+
+	public void skipRawBytes(int size) throws IOException {
+		if (size < 0) {
+			throw InvalidProtocolBufferNanoException.negativeSize();
+		}
+
+		if (this.bufferPos + size > this.currentLimit) {
+			skipRawBytes(this.currentLimit - this.bufferPos);
+
+			throw InvalidProtocolBufferNanoException.truncatedMessage();
+		}
+
+		if (size <= this.bufferSize - this.bufferPos) {
+			this.bufferPos += size;
+		} else
+			throw InvalidProtocolBufferNanoException.truncatedMessage();
+	}
+}
